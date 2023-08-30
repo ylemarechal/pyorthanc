@@ -1,39 +1,18 @@
 from datetime import datetime
-from typing import Dict, Any, List
+from typing import Any, Dict, List
 
 import pydicom
 
-from pyorthanc import util
-from pyorthanc.client import Orthanc
+from .resource import Resource
+from .. import util
 
 
-class Instance:
+class Instance(Resource):
     """Represent an instance that is in an Orthanc server
 
     This object has many getters that allow the user to retrieve metadata
     or the entire DICOM file of the Instance
     """
-
-    def __init__(
-            self,
-            instance_id: str,
-            client: Orthanc,
-            instance_information: Dict = None) -> None:
-        """Constructor
-
-        Parameters
-        ----------
-        instance_id
-            Orthanc instance identifier.
-        client
-            Orthanc object.
-        instance_information
-            Dictionary of instance's information.
-        """
-        self.client = client
-
-        self.id_ = instance_id
-        self.information = instance_information
 
     def get_dicom_file_content(self) -> bytes:
         """Retrieves DICOM file
@@ -47,25 +26,16 @@ class Instance:
 
         Examples
         --------
-        >>> from pyorthanc import Instance
-        >>> instance = Instance('instance_identifier',
-        ...                     Orthanc('http://localhost:8042'))
-        >>> dicom_file_bytes = instance.get_dicom_file_content()
-        >>> with open('your_path', 'wb') as file_handler:
-        ...     file_handler.write(dicom_file_bytes)
+        ```python
+        from pyorthanc import Instance
+        instance = Instance('instance_identifier',
+                            Orthanc('http://localhost:8042'))
+        dicom_file_bytes = instance.get_dicom_file_content()
+        with open('your_path', 'wb') as file_handler:
+            file_handler.write(dicom_file_bytes)
+        ```
         """
         return self.client.get_instances_id_file(self.id_)
-
-    @property
-    def identifier(self) -> str:
-        """Get instance identifier
-
-        Returns
-        -------
-        str
-            Instance identifier
-        """
-        return self.id_
 
     @property
     def uid(self) -> str:
@@ -86,10 +56,14 @@ class Instance:
         Dict
             Dictionary with tags as key and information as value
         """
-        if self.information is None:
-            self.information = self.client.get_instances_id(self.id_)
+        if self.lock:
+            if self._information is None:
+                # Setup self._information for the first time when study is lock
+                self._information = self.client.get_instances_id(self.id_)
 
-        return self.information
+            return self._information
+
+        return self.client.get_instances_id(self.id_)
 
     @property
     def file_size(self) -> int:
@@ -164,6 +138,16 @@ class Instance:
             Simplified tags in the form of a dictionary.
         """
         return dict(self.client.get_instances_id_tags(self.id_, params={'simplify': True}))
+
+    @property
+    def labels(self) -> List[str]:
+        return self.get_main_information()['Labels']
+
+    def add_label(self, label: str) -> None:
+        self.client.put_instances_id_labels_label(self.id_, label)
+
+    def remove_label(self, label):
+        self.client.delete_instances_id_labels_label(self.id_, label)
 
     def get_content_by_tag(self, tag: str) -> Any:
         """Get content by tag

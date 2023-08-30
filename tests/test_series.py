@@ -1,20 +1,14 @@
 import io
+from datetime import datetime
 from zipfile import ZipFile
 
 import pytest
 
-from pyorthanc import Series
+from .conftest import LABEL_SERIES
 from .data import a_series
 
 
-@pytest.fixture
-def series(client_with_data):
-    return Series(client=client_with_data, series_id=a_series.IDENTIFIER)
-
-
 def test_attributes(series):
-    series.build_instances()
-
     assert series.get_main_information().keys() == a_series.INFORMATION.keys()
 
     assert series.identifier == a_series.IDENTIFIER
@@ -22,6 +16,9 @@ def test_attributes(series):
     assert series.modality == a_series.MODALITY
     assert series.manufacturer == a_series.MANUFACTURER
     assert series.study_identifier == a_series.PARENT_STUDY
+    assert series.labels == [LABEL_SERIES]
+    assert not series.is_stable
+    assert isinstance(series.last_update, datetime)
     assert series.instances != []
 
 
@@ -34,21 +31,16 @@ def test_zip(series):
 
 
 def test_anonymize(series):
-    series.build_instances()
-
     anonymized_series = series.anonymize(remove=['Modality'])
-    anonymized_series.build_instances()
     assert anonymized_series.uid != a_series.INFORMATION['MainDicomTags']['SeriesInstanceUID']
     with pytest.raises(KeyError):
         anonymized_series.modality
 
     anonymized_series = series.anonymize(replace={'Modality': 'RandomModality'})
-    anonymized_series.build_instances()
     assert series.modality in a_series.MODALITY
     assert anonymized_series.modality == 'RandomModality'
 
     anonymized_series = series.anonymize(keep=['StationName'])
-    anonymized_series.build_instances()
     assert series.get_main_information()['MainDicomTags']['StationName'] == \
            a_series.INFORMATION['MainDicomTags']['StationName']
     assert anonymized_series.get_main_information()['MainDicomTags']['StationName'] == \
@@ -56,10 +48,19 @@ def test_anonymize(series):
 
 
 def test_remote_empty_instances(series):
-    series.build_instances()
+    series.lock = True
 
     # Putting an empty instance
-    series._instances = [None]
+    series._child_resources = [None]
 
     series.remove_empty_instances()
     assert series.instances == []
+
+
+@pytest.mark.parametrize('label', ['a_label'])
+def test_label(series, label):
+    series.add_label(label)
+    assert label in series.labels
+
+    series.remove_label(label)
+    assert label not in series.labels

@@ -1,49 +1,18 @@
-from typing import List, Dict
+import warnings
+from datetime import datetime
+from typing import Dict, List
 
-from pyorthanc.study import Study
-from pyorthanc.client import Orthanc
+from .resource import Resource
+from .study import Study
+from .. import util
 
 
-class Patient:
+class Patient(Resource):
     """Represent a Patient that is in an Orthanc server
 
     This object has many getters that allow the user to retrieve metadata
     or the entire DICOM file of the Patient
     """
-
-    def __init__(
-            self,
-            patient_id: str,
-            client: Orthanc,
-            patient_information: Dict = None) -> None:
-        """Constructor
-
-        Parameters
-        ----------
-        patient_id
-            Orthanc patient identifier.
-        client
-            Orthanc object.
-        patient_information
-            Dictionary of patient's information.
-        """
-        self.client = client
-
-        self.id_ = patient_id
-        self.information = patient_information
-
-        self._studies: List[Study] = []
-
-    @property
-    def identifier(self) -> str:
-        """Get patient identifier
-
-        Returns
-        -------
-        str
-            Patient identifier
-        """
-        return self.id_
 
     def get_main_information(self) -> Dict:
         """Get Patient information
@@ -53,10 +22,14 @@ class Patient:
         Dict
             Dictionary of patient main information.
         """
-        if self.information is None:
-            self.information = self.client.get_patients_id(self.id_)
+        if self.lock:
+            if self._information is None:
+                # Setup self._information for the first time when patient is lock
+                self._information = self.client.get_patients_id(self.id_)
 
-        return self.information
+            return self._information
+
+        return self.client.get_patients_id(self.id_)
 
     @property
     def patient_id(self) -> str:
@@ -91,6 +64,28 @@ class Patient:
         """
         return self.get_main_information()['MainDicomTags']['PatientSex']
 
+    @property
+    def is_stable(self):
+        return self.get_main_information()['IsStable']
+
+    @property
+    def last_update(self) -> datetime:
+        last_updated_date_and_time = self.get_main_information()['LastUpdate'].split('T')
+        date = last_updated_date_and_time[0]
+        time = last_updated_date_and_time[1]
+
+        return util.make_datetime_from_dicom_date(date, time)
+
+    @property
+    def labels(self) -> List[str]:
+        return self.get_main_information()['Labels']
+
+    def add_label(self, label: str) -> None:
+        self.client.put_patients_id_labels_label(self.id_, label)
+
+    def remove_label(self, label):
+        self.client.delete_patients_id_labels_label(self.id_, label)
+
     def get_zip(self) -> bytes:
         """Get the bytes of the zip file
 
@@ -103,14 +98,16 @@ class Patient:
 
         Examples
         --------
-        >>> from pyorthanc import Orthanc, Patient
-        >>> a_patient = Patient(
-        ...     'A_PATIENT_IDENTIFIER',
-        ...     Orthanc('http://localhost:8042')
-        ... )
-        >>> bytes_content = a_patient.get_zip()
-        >>> with open('patient_zip_file_path.zip', 'wb') as file_handler:
-        ...     file_handler.write(bytes_content)
+        ```python
+        from pyorthanc import Orthanc, Patient
+        a_patient = Patient(
+            'A_PATIENT_IDENTIFIER',
+            Orthanc('http://localhost:8042')
+        )
+        bytes_content = a_patient.get_zip()
+        with open('patient_zip_file_path.zip', 'wb') as file_handler:
+            file_handler.write(bytes_content)
+        ```
 
         """
         return self.client.get_patients_id_archive(self.id_)
@@ -147,7 +144,8 @@ class Patient:
             params=params
         ))
 
-    def is_protected(self) -> bool:
+    @property
+    def protected(self) -> bool:
         """Get if patient is protected against recycling
 
         Protection against recycling: False means unprotected, True protected.
@@ -159,6 +157,30 @@ class Patient:
         """
         return '1' == self.client.get_patients_id_protected(self.id_)
 
+    @protected.setter
+    def protected(self, value: bool):
+        # As of version 1.11.1, the Orthanc OPEN API file has missing information
+        self.client._put(
+            f'{self.client.url}/patients/{self.id_}/protected',
+            json=1 if value else 0  # 1 means it will be protected, 0 means unprotected
+        )
+
+    def is_protected(self) -> bool:
+        """Get if patient is protected against recycling
+
+        Protection against recycling: False means unprotected, True protected.
+
+        Returns
+        -------
+        bool
+            False means unprotected, True means protected.
+        """
+        DeprecationWarning(
+            '`patient.is_protected()` is deprecated and will be removed in future release. '
+            'Use `patient.protected` instead.'
+        )
+        return self.protected
+
     def set_to_protected(self):
         """Set patient to protected state
 
@@ -168,10 +190,12 @@ class Patient:
             Nothing.
         """
         # As of version 1.11.1, the Orthanc OPEN API file has missing information
-        self.client._put(
-            f'{self.client.url}/patients/{self.id_}/protected',
-            json=1
+        warnings.warn(
+            '`patient.set_to_protected()` is deprecated and will be removed in future release. '
+            'Use `patient.protected = True` instead.',
+            DeprecationWarning
         )
+        self.protected = True
 
     def set_to_unprotected(self):
         """Set patient to unprotected state
@@ -182,10 +206,12 @@ class Patient:
             Nothing.
         """
         # As of version 1.11.1, the Orthanc OPEN API file has missing information
-        self.client._put(
-            f'{self.client.url}/patients/{self.id_}/protected',
-            json=0
+        warnings.warn(
+            '`patient.set_to_protected()` is deprecated and will be removed in future release. '
+            'Use `patient.protected = True` instead.',
+            DeprecationWarning
         )
+        self.protected = False
 
     @property
     def studies(self) -> List[Study]:
@@ -196,16 +222,16 @@ class Patient:
         List[Study]
             List of the patient's studies
         """
-        return self._studies
+        if self.lock:
+            if self._child_resources is None:
+                studies_information = self.client.get_patients_id_studies(self.id_)
+                self._child_resources = [Study(i['ID'], self.client, self.lock) for i in studies_information]
 
-    def build_studies(self) -> None:
-        """Build a list of the patient's studies
-        """
+            return self._child_resources
+
         studies_information = self.client.get_patients_id_studies(self.id_)
 
-        self._studies = [Study(i['ID'], self.client) for i in studies_information]
-        for study in self._studies:
-            study.build_series()
+        return [Study(i['ID'], self.client, self.lock) for i in studies_information]
 
     def anonymize(self, remove: List = None, replace: Dict = None, keep: List = None, force: bool = False) -> 'Patient':
         """Anonymize patient
@@ -222,7 +248,7 @@ class Patient:
         keep
             List of tag to keep unchanged
         force
-            Some tags can't be change without forcing it (e.g. PatientID) for security reason
+            Some tags can't be changed without forcing it (e.g. PatientID) for security reason
 
         Returns
         -------
@@ -240,17 +266,15 @@ class Patient:
 
         return Patient(anonymous_patient['ID'], self.client)
 
-    def __str__(self):
-        return f'Patient(PatientID={self.patient_id}, identifier={self.id_})'
-
     def remove_empty_studies(self) -> None:
         """Delete empty studies."""
-        for study in self._studies:
+        if self._child_resources is None:
+            return
+
+        for study in self._child_resources:
             study.remove_empty_series()
 
-        self._studies = list(filter(
-            lambda s: s.series != [], self._studies
-        ))
+        self._child_resources = [study for study in self._child_resources if study._child_resources != []]
 
     def __repr__(self):
         return f'Patient(PatientID={self.patient_id}, identifier={self.id_})'
