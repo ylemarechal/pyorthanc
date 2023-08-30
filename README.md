@@ -1,5 +1,6 @@
 [![ci](https://github.com/gacou54/pyorthanc/workflows/Test/badge.svg)](https://github.com/gacou54/pyorthanc/actions?query=workflow%3ATest)
-[![documentation](https://img.shields.io/badge/docs-mkdocs%20material-blue.svg?style=flat)](https://gacou54.github.io/pyorthanc/)
+![PyPI - Version](https://img.shields.io/pypi/v/pyorthanc)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/pyorthanc)
 
 PyOrthanc
 =========
