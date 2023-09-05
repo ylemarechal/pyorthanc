@@ -4,6 +4,7 @@ from zipfile import ZipFile
 
 import pytest
 
+from pyorthanc import Patient, errors
 from .conftest import LABEL_PATIENT
 from .data import a_patient
 
@@ -15,6 +16,8 @@ def test_attributes(patient):
     assert patient.patient_id == a_patient.ID
     assert patient.name == a_patient.NAME
     assert patient.sex == a_patient.SEX
+    assert patient.birth_date == datetime(year=1941, month=9, day=1)
+    assert patient.other_patient_ids == ['other-id-1', 'other-id-2']
 
     assert patient.labels == [LABEL_PATIENT]
     assert not patient.is_stable
@@ -56,7 +59,7 @@ def test_protection(patient):
 def test_anonymize(patient):
     anonymize_patient = patient.anonymize(remove=['PatientName'])
     assert anonymize_patient.patient_id != a_patient.ID
-    with pytest.raises(KeyError):
+    with pytest.raises(errors.TagDoesNotExistError):
         anonymize_patient.name
 
     anonymize_patient = patient.anonymize(replace={'PatientName': 'NewName'})
@@ -66,6 +69,28 @@ def test_anonymize(patient):
     anonymize_patient = patient.anonymize(keep=['PatientName'])
     assert patient.name == a_patient.NAME
     assert anonymize_patient.name == a_patient.NAME
+
+
+def test_anonymize_as_job(patient):
+    job = patient.anonymize_as_job(remove=['PatientName'])
+    job.wait_until_completion()
+    anonymize_patient = Patient(job.content['ID'], patient.client)
+    assert anonymize_patient.patient_id != a_patient.ID
+    with pytest.raises(errors.TagDoesNotExistError):
+        anonymize_patient.name
+
+    job = patient.anonymize_as_job(replace={'PatientName': 'NewName'})
+    job.wait_until_completion()
+    anonymize_patient = Patient(job.content['ID'], patient.client)
+    assert patient.name == a_patient.NAME
+    assert anonymize_patient.name == 'NewName'
+
+    job = patient.anonymize_as_job(keep=['PatientName'])
+    job.wait_until_completion()
+    anonymize_patient = Patient(job.content['ID'], patient.client)
+    assert patient.name == a_patient.NAME
+    assert anonymize_patient.name == a_patient.NAME
+
 
 
 @pytest.mark.parametrize('label', ['a_label'])
