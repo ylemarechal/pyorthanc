@@ -1,3 +1,5 @@
+import tempfile
+
 import pytest
 
 from pyorthanc import AsyncOrthanc, Instance, Modality, Orthanc, Patient, Series, Study
@@ -12,7 +14,7 @@ LABEL_INSTANCE = 'my_label_instance'
 
 @pytest.fixture
 def client():
-    yield Orthanc(ORTHANC_1.url, ORTHANC_1.username, ORTHANC_1.password)
+    yield Orthanc(ORTHANC_1.url, ORTHANC_1.username, ORTHANC_1.password, timeout=60)
 
     clear_data(ORTHANC_1)
 
@@ -89,3 +91,9 @@ def series(client_with_data_and_labels):
 @pytest.fixture
 def instance(client_with_data_and_labels):
     return Instance(client=client_with_data_and_labels, id_=an_instance.IDENTIFIER)
+
+
+@pytest.fixture
+def tmp_dir():
+    with tempfile.TemporaryDirectory() as dir_path:
+        yield dir_path

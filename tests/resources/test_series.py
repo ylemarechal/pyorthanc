@@ -5,13 +5,14 @@ from zipfile import ZipFile
 import httpx
 import pytest
 
-from pyorthanc import Series, Study, errors
-from .conftest import LABEL_SERIES
-from .data import a_series
+from pyorthanc import Patient, Series, Study, errors
+from tests.conftest import LABEL_SERIES
+from tests.data import a_patient, a_series, a_study
 
 
-def test_attributes(series):
+def test_attributes(series: Series):
     assert series.get_main_information().keys() == a_series.INFORMATION.keys()
+    assert series.main_dicom_tags == a_series.INFORMATION['MainDicomTags']
 
     assert series.identifier == a_series.IDENTIFIER
     assert series.uid == a_series.INFORMATION['MainDicomTags']['SeriesInstanceUID']
@@ -22,10 +23,20 @@ def test_attributes(series):
     assert series.station_name == a_series.INFORMATION['MainDicomTags']['StationName']
     assert series.image_orientation_patient == [1, 0, 0, 0, 1, 0]
 
+    shared_tags = series.shared_tags
+    assert isinstance(shared_tags, dict)
+    assert 'PatientName' in shared_tags  # simply checking for common shared tags
+    assert 'PixelSpacing' in shared_tags
+
     assert series.labels == [LABEL_SERIES]
     assert not series.is_stable
     assert isinstance(series.last_update, datetime)
     assert str(series) == f'Series({a_series.IDENTIFIER})'
+
+    assert isinstance(series.parent_study, Study)
+    assert series.parent_study.date == a_study.DATE
+    assert isinstance(series.parent_patient, Patient)
+    assert series.parent_patient.name == a_patient.NAME
 
     for absent_attribute in ['performed_procedure_step_description', 'sequence_name',
                              'protocol_name', 'description', 'body_part_examined', 'cardiac_number_of_images',
@@ -39,12 +50,22 @@ def test_attributes(series):
 def test_zip(series):
     result = series.get_zip()
 
-    assert type(result) == bytes
+    assert isinstance(result, bytes)
     zipfile = ZipFile(io.BytesIO(result))
     assert zipfile.testzip() is None  # Verify that zip files are valid (if it is, returns None)
 
 
-def test_anonymize(series):
+def test_download(series: Series, tmp_dir: str):
+    buffer = io.BytesIO()
+    series.download(buffer)
+    buffer.seek(0)
+    assert ZipFile(buffer).testzip() is None  # Verify that zip files are valid (if it is, returns None)
+
+    series.download(f'{tmp_dir}/file.zip')
+    assert ZipFile(f'{tmp_dir}/file.zip').testzip() is None
+
+
+def test_anonymize(series: Series):
     anonymized_series = series.anonymize(remove=['Modality'])
     assert anonymized_series.uid != a_series.INFORMATION['MainDicomTags']['SeriesInstanceUID']
     with pytest.raises(errors.TagDoesNotExistError):
@@ -61,7 +82,7 @@ def test_anonymize(series):
            a_series.INFORMATION['MainDicomTags']['StationName']
 
 
-def test_anonymize_as_job(series):
+def test_anonymize_as_job(series: Series):
     job = series.anonymize_as_job(remove=['Modality'])
     job.wait_until_completion()
     anonymized_series = Series(job.content['ID'], series.client)
@@ -84,7 +105,7 @@ def test_anonymize_as_job(series):
            a_series.INFORMATION['MainDicomTags']['StationName']
 
 
-def test_modify_remove(series):
+def test_modify_remove(series: Series):
     assert series.manufacturer == a_series.MANUFACTURER
 
     modified_series = series.modify(remove=['Manufacturer'])
@@ -110,7 +131,7 @@ def test_modify_remove(series):
         series.modify(remove=['SeriesInstanceUID'], force=True)
 
 
-def test_modify_replace(series):
+def test_modify_replace(series: Series):
     assert series.manufacturer == a_series.MANUFACTURER
 
     modified_series = series.modify(replace={'Manufacturer': 'new-manufacturer'})
@@ -140,7 +161,7 @@ def test_modify_replace(series):
     assert modified_series.id_ != series.id_
 
 
-def test_modify_as_job_remove(series):
+def test_modify_as_job_remove(series: Series):
     # Create new modified series
     job = series.modify_as_job(remove=['Manufacturer'])
     job.wait_until_completion()
@@ -174,7 +195,7 @@ def test_modify_as_job_remove(series):
     assert 'ID' not in job.content  # Has no effect because SeriesInstanceUID can't be removed
 
 
-def test_modify_as_job_replace(series):
+def test_modify_as_job_replace(series: Series):
     job = series.modify_as_job(replace={'Manufacturer': 'new-manufacturer'})
     job.wait_until_completion()
     modified_series = Series(job.content['ID'], series.client)

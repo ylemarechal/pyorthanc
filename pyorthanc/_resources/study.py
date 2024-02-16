@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, List
+from typing import BinaryIO, Dict, List, TYPE_CHECKING, Union
 
 from httpx import ReadTimeout
 
@@ -7,6 +9,9 @@ from .resource import Resource
 from .series import Series
 from .. import errors, util
 from ..jobs import Job
+
+if TYPE_CHECKING:
+    from . import Patient
 
 
 class Study(Resource):
@@ -76,6 +81,11 @@ class Study(Resource):
     def patient_identifier(self) -> str:
         """Get the Orthanc identifier of the parent patient"""
         return self.get_main_information()['ParentPatient']
+
+    @property
+    def parent_patient(self) -> Patient:
+        from . import Patient
+        return Patient(self.patient_identifier, self.client)
 
     @property
     def patient_information(self) -> Dict:
@@ -506,17 +516,57 @@ class Study(Resource):
         --------
         ```python
         from pyorthanc import Orthanc, Study
-        a_study = Study(
-            'STUDY_IDENTIFIER',
-            Orthanc('http://localhost:8042')
-        )
+        a_study = Study('STUDY_IDENTIFIER', Orthanc('http://localhost:8042'))
+
         bytes_content = a_study.get_zip()
         with open('study_zip_file_path.zip', 'wb') as file_handler:
             file_handler.write(bytes_content)
         ```
-
         """
         return self.client.get_studies_id_archive(self.id_)
+
+    def download(self, filepath: Union[str, BinaryIO], with_progres: bool = False) -> None:
+        """Download the zip file to a target path or buffer
+
+        This method is an alternative to the `.get_zip()` method for large files.
+        The `.get_zip()` method will pull all the data in a single GET call,
+        while `.download()` stream the data to a file or a buffer.
+        Favor the `.download()` method to avoid timeout and memory issues.
+
+        Examples
+        --------
+        ```python
+        from pyorthanc import Orthanc, Study
+        a_study = Study('STUDY_IDENTIFIER', Orthanc('http://localhost:8042'))
+
+        # Download a zip
+        a_study.download('study.zip')
+
+        # Download a zip and show progress
+        a_study.download('study.zip', with_progres=True)
+
+        # Or download in a buffer in memory
+        buffer = io.BytesIO()
+        a_study.download(buffer)
+        # Now do whatever you want to do
+        buffer.seek(0)
+        zip_bytes = buffer.read()
+        ```
+        """
+        self._download_file(f'{self.client.url}/studies/{self.id_}/archive', filepath, with_progres)
+
+    def get_shared_tags(self, simplify: bool = False, short: bool = False) -> Dict:
+        """Retrieve the shared tags of the study"""
+        params = self._make_response_format_params(simplify, short)
+
+        return dict(self.client.get_studies_id_shared_tags(
+            self.id_,
+            params=params
+        ))
+
+    @property
+    def shared_tags(self) -> Dict:
+        return self.get_shared_tags(simplify=True)
 
     def remove_empty_series(self) -> None:
         """Delete empty series."""

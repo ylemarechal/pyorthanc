@@ -4,7 +4,7 @@ import pydicom
 import pytest
 
 from pyorthanc import AsyncOrthanc, Orthanc, util
-from .data import an_instance
+from .data import a_patient, a_series, a_study, an_instance
 
 
 def test_async_to_sync(async_client):
@@ -46,3 +46,27 @@ def test_ensure_non_raw_response(client, return_raw_response):
 
     assert not new_client.return_raw_response
     assert client.return_raw_response == return_raw_response
+
+
+def test_to_orthanc_patient_id():
+    result = util.to_orthanc_patient_id(a_patient.ID)
+
+    assert result == a_patient.IDENTIFIER
+
+
+def test_to_orthanc_study_id():
+    result = util.to_orthanc_study_id(a_patient.ID, a_study.UID)
+
+    assert result == a_study.IDENTIFIER
+
+
+def test_to_orthanc_series_id():
+    result = util.to_orthanc_series_id(a_patient.ID, a_study.UID, a_series.UID)
+
+    assert result == a_series.IDENTIFIER
+
+
+def test_to_orthanc_instance_id():
+    result = util.to_orthanc_instance_id(a_patient.ID, a_study.UID, a_series.UID, an_instance.UID)
+
+    assert result == an_instance.IDENTIFIER

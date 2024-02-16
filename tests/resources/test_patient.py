@@ -6,12 +6,13 @@ import httpx
 import pytest
 
 from pyorthanc import Patient, errors
-from .conftest import LABEL_PATIENT
-from .data import a_patient
+from tests.conftest import LABEL_PATIENT
+from tests.data import a_patient
 
 
 def test_attributes(patient):
     assert patient.get_main_information().keys() == a_patient.INFORMATION.keys()
+    assert patient.main_dicom_tags == a_patient.INFORMATION['MainDicomTags']
 
     assert patient.identifier == a_patient.IDENTIFIER
     assert patient.patient_id == a_patient.ID
@@ -25,15 +26,30 @@ def test_attributes(patient):
     assert isinstance(patient.last_update, datetime)
     assert str(patient) == f'Patient({a_patient.IDENTIFIER})'
 
+    shared_tags = patient.shared_tags
+    assert isinstance(shared_tags, dict)
+    assert 'PatientName' in shared_tags  # simply checking for common shared tags
+    assert 'PatientBirthDate' in shared_tags
+
     assert [s.identifier for s in patient.studies] == a_patient.INFORMATION['Studies']
 
 
 def test_zip(patient):
     result = patient.get_zip()
 
-    assert type(result) == bytes
+    assert isinstance(result, bytes)
     zipfile = ZipFile(io.BytesIO(result))
     assert zipfile.testzip() is None  # Verify that zip files are valid (if it is, returns None)
+
+
+def test_download(patient: Patient, tmp_dir: str):
+    buffer = io.BytesIO()
+    patient.download(buffer)
+    buffer.seek(0)
+    assert ZipFile(buffer).testzip() is None  # Verify that zip files are valid (if it is, returns None)
+
+    patient.download(f'{tmp_dir}/file.zip')
+    assert ZipFile(f'{tmp_dir}/file.zip').testzip() is None
 
 
 def test_patient_module(patient):
@@ -72,7 +88,7 @@ def test_anonymize(patient):
     assert anonymize_patient.name == a_patient.NAME
 
 
-def test_anonymize_as_job(patient):
+def test_anonymize_as_job(patient: Patient):
     job = patient.anonymize_as_job(remove=['PatientName'])
     job.wait_until_completion()
     anonymize_patient = Patient(job.content['ID'], patient.client)
@@ -140,7 +156,7 @@ def test_modify_as_job_remove(patient):
     assert 'ID' not in job.content  # Has no effect because PatientID can't be removed
 
 
-def test_modify_as_job_replace(patient):
+def test_modify_as_job_replace(patient: Patient):
     job = patient.modify_as_job(replace={'PatientName': 'NewName'})
     assert patient.name == a_patient.NAME
 

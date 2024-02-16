@@ -7,9 +7,8 @@ RUN python -m pip install poetry
 
 # Installing project dependecies
 COPY ../../pyproject.toml .
-RUN poetry install
+RUN poetry install --extras "all"
 
 COPY ../.. /app
 
 ENTRYPOINT [ "poetry", "run", "pytest", "-vv" ]
-#ENTRYPOINT [ "python", "-m", "http.server" ]

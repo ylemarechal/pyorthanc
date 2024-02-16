@@ -1,5 +1,7 @@
+from __future__ import annotations
+
 from datetime import datetime
-from typing import Dict, List
+from typing import BinaryIO, Dict, List, TYPE_CHECKING, Union
 
 from httpx import ReadTimeout
 
@@ -7,6 +9,9 @@ from .instance import Instance
 from .resource import Resource
 from .. import errors, util
 from ..jobs import Job
+
+if TYPE_CHECKING:
+    from . import Patient, Study
 
 
 class Series(Resource):
@@ -57,6 +62,15 @@ class Series(Resource):
         return self.get_main_information()['ParentStudy']
 
     @property
+    def parent_study(self) -> Study:
+        from . import Study
+        return Study(self.study_identifier, self.client)
+
+    @property
+    def parent_patient(self) -> Patient:
+        return self.parent_study.parent_patient
+
+    @property
     def date(self) -> datetime:
         """Get series datetime
 
@@ -98,7 +112,7 @@ class Series(Resource):
 
     @property
     def description(self) -> str:
-        return self._get_main_dicom_tag_value('StudyDescription')
+        return self._get_main_dicom_tag_value('SeriesDescription')
 
     @property
     def body_part_examined(self) -> str:
@@ -544,10 +558,8 @@ class Series(Resource):
         --------
         ```python
         from pyorthanc import Orthanc, Series
-        a_series = Series(
-            'SERIES_IDENTIFIER',
-            Orthanc('http://localhost:8042')
-        )
+        a_series = Series('SERIES_IDENTIFIER', Orthanc('http://localhost:8042'))
+
         bytes_content = a_series.get_zip()
         with open('series_zip_file_path.zip', 'wb') as file_handler:
             file_handler.write(bytes_content)
@@ -555,6 +567,49 @@ class Series(Resource):
 
         """
         return self.client.get_series_id_archive(self.id_)
+
+    def download(self, filepath: Union[str, BinaryIO], with_progres: bool = False) -> None:
+        """Download the zip file to a target path or buffer
+
+        This method is an alternative to the `.get_zip()` method for large files.
+        The `.get_zip()` method will pull all the data in a single GET call,
+        while `.download()` stream the data to a file or a buffer.
+        Favor the `.download()` method to avoid timeout and memory issues.
+
+        Examples
+        --------
+        ```python
+        from pyorthanc import Orthanc, Series
+        a_series = Series('SERIES_IDENTIFIER', Orthanc('http://localhost:8042'))
+
+        # Download a zip
+        a_series.download('series.zip')
+
+        # Download a zip and show progress
+        a_series.download('series.zip', with_progres=True)
+
+        # Or download in a buffer in memory
+        buffer = io.BytesIO()
+        a_series.download(buffer)
+        # Now do whatever you want to do
+        buffer.seek(0)
+        zip_bytes = buffer.read()
+        ```
+        """
+        self._download_file(f'{self.client.url}/series/{self.id_}/archive', filepath, with_progres)
+
+    def get_shared_tags(self, simplify: bool = False, short: bool = False) -> Dict:
+        """Retrieve the shared tags of the series"""
+        params = self._make_response_format_params(simplify, short)
+
+        return dict(self.client.get_series_id_shared_tags(
+            self.id_,
+            params=params
+        ))
+
+    @property
+    def shared_tags(self) -> Dict:
+        return self.get_shared_tags(simplify=True)
 
     def remove_empty_instances(self) -> None:
         if self._child_resources is not None:

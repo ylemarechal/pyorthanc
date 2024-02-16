@@ -5,13 +5,14 @@ from zipfile import ZipFile
 import httpx
 import pytest
 
-from pyorthanc import Study, errors, util
-from .conftest import LABEL_STUDY
-from .data import a_study
+from pyorthanc import Patient, Study, errors, util
+from tests.conftest import LABEL_STUDY
+from tests.data import a_patient, a_study
 
 
-def test_attributes(study):
+def test_attributes(study: Study):
     assert study.get_main_information().keys() == a_study.INFORMATION.keys()
+    assert study.main_dicom_tags == a_study.INFORMATION['MainDicomTags']
 
     assert study.identifier == a_study.IDENTIFIER
     assert study.study_id == a_study.ID
@@ -26,12 +27,20 @@ def test_attributes(study):
     assert study.series != []
     assert str(study) == f'Study({a_study.IDENTIFIER})'
 
+    assert isinstance(study.parent_patient, Patient)
+    assert study.parent_patient.name == a_patient.NAME
+
+    shared_tags = study.shared_tags
+    assert isinstance(shared_tags, dict)
+    assert 'PatientName' in shared_tags  # simply checking for common shared tags
+    assert 'StudyDate' in shared_tags
+
     for absent_attribute in ['description', 'institution_name', 'requested_procedure_description', 'requesting_physician']:
         with pytest.raises(errors.TagDoesNotExistError):
             getattr(study, absent_attribute)
 
 
-def test_remove_empty_series(study):
+def test_remove_empty_series(study: Study):
     study.lock = True
 
     for series in study.series:
@@ -44,9 +53,19 @@ def test_remove_empty_series(study):
 def test_zip(study):
     result = study.get_zip()
 
-    assert type(result) == bytes
+    assert isinstance(result, bytes)
     zipfile = ZipFile(io.BytesIO(result))
     assert zipfile.testzip() is None  # Verify that zip files are valid (if it is, returns None)
+
+
+def test_download(study: Study, tmp_dir: str):
+    buffer = io.BytesIO()
+    study.download(buffer)
+    buffer.seek(0)
+    assert ZipFile(buffer).testzip() is None  # Verify that zip files are valid (if it is, returns None)
+
+    study.download(f'{tmp_dir}/file.zip')
+    assert ZipFile(f'{tmp_dir}/file.zip').testzip() is None
 
 
 def test_anonymize(study):
@@ -64,7 +83,7 @@ def test_anonymize(study):
     assert anonymized_study.date == a_study.DATE
 
 
-def test_anonymize_as_job(study):
+def test_anonymize_as_job(study: Study):
     job = study.anonymize_as_job(remove=['StudyDate'])
     job.wait_until_completion()
     anonymize_study = Study(job.content['ID'], study.client)
@@ -84,7 +103,7 @@ def test_anonymize_as_job(study):
     assert anonymize_study.date == a_study.DATE
 
 
-def test_modify_remove(study):
+def test_modify_remove(study: Study):
     assert study.referring_physician_name == a_study.INFORMATION['MainDicomTags']['ReferringPhysicianName']
 
     modified_study = study.modify(remove=['ReferringPhysicianName'])
@@ -132,7 +151,7 @@ def test_modify_replace(study):
     assert modified_study.id_ != study.id_
 
 
-def test_modify_as_job_remove(study):
+def test_modify_as_job_remove(study: Study):
     # Create new modified study
     job = study.modify_as_job(remove=['ReferringPhysicianName'])
     job.wait_until_completion()
@@ -165,7 +184,7 @@ def test_modify_as_job_remove(study):
     assert 'ID' not in job.content  # Has no effect because StudyInstanceUID can't be removed
 
 
-def test_modify_as_job_replace(study):
+def test_modify_as_job_replace(study: Study):
     job = study.modify_as_job(replace={'ReferringPhysicianName': 'last^first'})
     job.wait_until_completion()
     modified_study = Study(job.content['ID'], study.client)

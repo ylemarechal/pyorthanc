@@ -1,6 +1,6 @@
 import warnings
 from datetime import datetime
-from typing import Dict, List
+from typing import BinaryIO, Dict, List, Union
 
 from httpx import ReadTimeout
 
@@ -107,6 +107,36 @@ class Patient(Resource):
         """
         return self.client.get_patients_id_archive(self.id_)
 
+    def download(self, filepath: Union[str, BinaryIO], with_progres: bool = False) -> None:
+        """Download the zip file to a target path or buffer
+
+        This method is an alternative to the `.get_zip()` method for large files.
+        The `.get_zip()` method will pull all the data in a single GET call,
+        while `.download()` stream the data to a file or a buffer.
+        Favor the `.download()` method to avoid timeout and memory issues.
+
+        Examples
+        --------
+        ```python
+        from pyorthanc import Orthanc, Patient
+        a_patient = Patient('A_PATIENT_IDENTIFIER', Orthanc('http://localhost:8042'))
+
+        # Download a zip
+        a_patient.download('patient.zip')
+
+        # Download a zip and show progress
+        a_patient.download('patient.zip', with_progres=True)
+
+        # Or download in a buffer in memory
+        buffer = io.BytesIO()
+        a_patient.download(buffer)
+        # Now do whatever you want to do
+        buffer.seek(0)
+        zip_bytes = buffer.read()
+        ```
+        """
+        self._download_file(f'{self.client.url}/patients/{self.id_}/archive', filepath, with_progres)
+
     def get_patient_module(self, simplify: bool = False, short: bool = False) -> Dict:
         """Get patient module in a simplified version
 
@@ -125,14 +155,7 @@ class Patient(Resource):
         Dict
             DICOM Patient module.
         """
-        if simplify and not short:
-            params = {'simplify': True}
-        elif short and not simplify:
-            params = {'short': True}
-        elif simplify and short:
-            raise ValueError('simplify and short can\'t be both True')
-        else:
-            params = {}
+        params = self._make_response_format_params(simplify, short)
 
         return dict(self.client.get_patients_id_module(
             self.id_,
@@ -571,6 +594,19 @@ class Patient(Resource):
         job_info = self.client.post_patients_id_modify(self.id_, data)
 
         return Job(job_info['ID'], self.client)
+
+    def get_shared_tags(self, simplify: bool = False, short: bool = False) -> Dict:
+        """Retrieve the shared tags of the patient"""
+        params = self._make_response_format_params(simplify, short)
+
+        return dict(self.client.get_patients_id_shared_tags(
+            self.id_,
+            params=params
+        ))
+
+    @property
+    def shared_tags(self) -> Dict:
+        return self.get_shared_tags(simplify=True)
 
     def remove_empty_studies(self) -> None:
         """Delete empty studies."""
